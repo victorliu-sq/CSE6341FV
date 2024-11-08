@@ -16,6 +16,12 @@ public class Transaction {
         operations = new LinkedList<>();
     }
 
+    // copy constructor
+    public Transaction(Transaction txn) {
+        this.id = txn.id;
+        operations = new LinkedList<>(txn.getOperations());
+    }
+
     public int getID() {
         return this.id;
     }

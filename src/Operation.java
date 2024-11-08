@@ -6,8 +6,8 @@ public class Operation {
     private int value; //for read, this is the return value; for write, this is the value to write;
 
     public Operation(int type, int rowNumber, int value) {
-        this.type = type;
         this.rowNumber = rowNumber;
+        this.type = type;
         this.value = value;
     }
 

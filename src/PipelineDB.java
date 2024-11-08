@@ -1,8 +1,10 @@
 package src;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class PipelineDB {
     private int numRows;
@@ -12,7 +14,9 @@ public class PipelineDB {
 
     private LinkedBlockingQueue<Transaction>[] pipeline;
     private Thread[] threads;
-    private CountDownLatch latch;
+//    private CountDownLatch latch;
+
+    private HashMap<Integer, CountDownLatch> TXNID2Latch;
 
     public Row[] getRows() {
         return rows;
@@ -28,7 +32,7 @@ public class PipelineDB {
 
         rows = new Row[numRows];
         for (int i = 0; i < numRows; i++) {
-            rows[i] = new Row(i);
+            rows[i] = new Row(-1);
         }
 
         pipeline = new LinkedBlockingQueue[this.numThreads];
@@ -47,6 +51,9 @@ public class PipelineDB {
             threads[index].start();
         }
 
+        // Init Mapping from TXNID to Latch
+        TXNID2Latch = new HashMap<>();
+
         System.out.println("Pipeline has been initialized");
         System.out.println();
     }
@@ -63,10 +70,10 @@ public class PipelineDB {
                     if (rid >= low && rid <= high) {
                         if (op.getType() == 0) {
                             op.setValue(rows[rid].getValue());
-                            System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " reads row " + rid + " = " + op.getValue());
+                            System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " reads row " + rid + " as " + op.getValue());
                         } else {
                             rows[rid].setValue(op.getValue());
-                            System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " sets row " + rid + " = " + op.getValue());
+                            System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " sets row " + rid + " to " + op.getValue());
                         }
                     }
                 }
@@ -75,7 +82,8 @@ public class PipelineDB {
                     pipeline[index + 1].put(txn);
                     System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " is added to the next slot [" + index + "]");
                 } else {
-                    latch.countDown();
+                    // countDown the latch of corresponding TXN
+                    TXNID2Latch.get(txn.getID()).countDown();
                     System.out.println("Pipeline slot[" + index + "]: Transaction " + txn.getID() + " has completed");
                 }
 
@@ -88,10 +96,22 @@ public class PipelineDB {
 
     public void executeTransactions(List<Transaction> transactions) {
         System.out.println("Start to execute transactions:");
-        latch = new CountDownLatch(transactions.size());
 
         for (Transaction t : transactions) {
             try {
+                // Generate a random delay between 100 and 200 milliseconds
+                int delay = ThreadLocalRandom.current().nextInt(100, 551);
+                System.out.println("Thread sleeping for " + delay + " ms");
+
+                // Put the thread to sleep for the generated delay
+                Thread.sleep(delay);
+                System.out.println("Thread awake after " + delay + " ms");
+
+                CountDownLatch latch = new CountDownLatch(1);
+                TXNID2Latch.put(t.getID(), latch);
+
+
+                // Put the transaction into pipeline
                 pipeline[0].put(t);
                 System.out.println("Transaction " + t.getID() + " is added to pipeline");
             } catch (Exception e) {
@@ -100,7 +120,9 @@ public class PipelineDB {
         }
 
         try {
-            latch.await(); // Wait until all transactions have been processed
+            for (Transaction t : transactions) {
+                TXNID2Latch.get(t.getID()).await();
+            }
             System.out.println("All TXNs have completed");
             System.out.println();
         } catch (InterruptedException e) {
