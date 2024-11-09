@@ -14,7 +14,6 @@ public class PipelineDB {
 
     private LinkedBlockingQueue<Transaction>[] pipeline;
     private Thread[] threads;
-//    private CountDownLatch latch;
 
     private HashMap<Integer, CountDownLatch> TXNID2Latch;
 

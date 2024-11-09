@@ -17,7 +17,7 @@ public class TwoPLDB {
         numRows = 100;
         rows = new Row[numRows];
         for (int i = 0; i < numRows; i++) {
-            rows[i] = new Row(i);
+            rows[i] = new Row(-1);
         }
 
         locks = new HashMap<>();
@@ -30,7 +30,7 @@ public class TwoPLDB {
         this.numRows = numRows;
         rows = new Row[numRows];
         for (int i = 0; i < numRows; i++) {
-            rows[i] = new Row(i);
+            rows[i] = new Row(-1);
         }
 
         locks = new HashMap<>();
@@ -47,62 +47,75 @@ public class TwoPLDB {
     private void executeTransaction(Transaction txn) {
         boolean success = false;
 
+        // map rowID to access type (0: read, 1:write)
+        Map<Integer, Integer> rid2LockType = new HashMap<>();
+        for (Operation op : txn.getOperations()) {
+            Integer rid = op.getRowNumber();
+            if (op.getType() == 0 && !rid2LockType.containsKey(rid)) {
+                rid2LockType.put(rid, op.getType());
+            } else if (op.getType() == 1) {
+                rid2LockType.put(rid, op.getType());
+            }
+        }
+
+        // acquire locks for all rows
+
         while (!success) {
-            List<Integer> ridsR = new ArrayList<>();
-            List<Integer> ridsW = new ArrayList<>();
             Map<Integer, Integer> oldValues = new HashMap<>();
             boolean aborted = false;
+
+            // map rowID to locked or not to avoid duplicate locking
+            Map<Integer, Boolean> rid2Locked = new HashMap<>();
 
             // Growing Phase
             for (Operation op : txn.getOperations()) {
                 Integer rid = op.getRowNumber();
-                if (op.getType() == 0) { // Read operation
-                    if (locks.get(rid).readLock().tryLock()) { // Acquire read lock
-                        ridsR.add(rid);
-                        op.setValue(rows[rid].getValue());
-                        System.out.println("Transaction " + txn.getID() + " reads row " + rid + " = " + op.getValue());
+                if (!rid2Locked.containsKey(rid)) {
+                    if (rid2LockType.get(rid) == 0) {
+                        if (!locks.get(rid).readLock().tryLock()) {
+                            aborted = true;
+                        } else {
+                            rid2Locked.put(rid, true);
+                        }
                     } else {
-                        aborted = true;
-                        break;
+                        if (!locks.get(rid).writeLock().tryLock()) {
+                            aborted = true;
+                        } else {
+                            rid2Locked.put(rid, true);
+                        }
                     }
-                } else { // Write operation
-                    if (locks.get(rid).writeLock().tryLock()) { // Acquire write lock
-                        ridsW.add(rid);
-                        oldValues.put(rid, rows[rid].getValue()); // Save old value for rollback
-                        rows[rid].setValue(op.getValue());
-                        System.out.println("Transaction " + txn.getID() + " sets row " + rid + " = " + op.getValue());
-                    } else {
-                        aborted = true;
-                        break;
-                    }
+                }
+
+                if (op.getType() == 0) {
+                    op.setValue(rows[rid].getValue());
+                    System.out.println("Transaction " + txn.getID() + " reads row " + rid + " as " + op.getValue());
+                } else {
+                    oldValues.put(rid, rows[rid].getValue()); // Save old value for rollback
+                    rows[rid].setValue(op.getValue());
+                    System.out.println("Transaction " + txn.getID() + " sets row " + rid + " to " + op.getValue());
                 }
             }
 
             // If aborted, perform rollback and retry
             if (aborted) {
-                System.out.println("Transaction " + txn.getID() + " aborted. Retrying...");
+                // cascading rollbacks
+                System.out.println("Transaction " + txn.getID() + " aborted. Cascading Rollcacks and retries");
                 for (Map.Entry<Integer, Integer> entry : oldValues.entrySet()) {
                     rows[entry.getKey()].setValue(entry.getValue());
                 }
-                // Release locks to allow retry
-                for (Integer rid : ridsR) {
-                    locks.get(rid).readLock().unlock();
-                }
-                for (Integer rid : ridsW) {
-                    locks.get(rid).writeLock().unlock();
-                }
-                continue; // Retry the transaction
+            } else {
+                System.out.println("Transaction " + txn.getID() + " succeed.");
+                success = true; // Transaction completed successfully
             }
 
-            // Releasing Phase if transaction is successful
-            for (Integer rid : ridsR) {
-                locks.get(rid).readLock().unlock();
+            // Release locks
+            for (Map.Entry<Integer, Boolean> entry : rid2Locked.entrySet()) {
+                if (rid2LockType.get(entry.getKey()) == 0) {
+                    locks.get(entry.getKey()).readLock().unlock();
+                } else {
+                    locks.get(entry.getKey()).writeLock().unlock();
+                }
             }
-            for (Integer rid : ridsW) {
-                locks.get(rid).writeLock().unlock();
-            }
-
-            success = true; // Transaction completed successfully
         }
     }
 

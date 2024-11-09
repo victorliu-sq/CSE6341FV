@@ -95,7 +95,6 @@ public final class Serializability {
                 break;
             }
         }
-
         return isSerializable;
     }
 }
